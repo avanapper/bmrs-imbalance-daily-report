@@ -1,9 +1,30 @@
 import requests
 import pandas as pd 
-from datetime import datetime, timedelta
+from datetime import datetime
+
+class Date:
+
+    def __init__(self, year: int, month: int, day: int):
+        self.year = year
+        self.month = month
+        self.day = day
+
+    def to_string(self):
+        return f"{self.year}-{self.month:02d}-{self.day:02d}"
+
+    def yesterday(self):
+        pass
+
+    def tomorow(self):
+        pass
+
+    @classmethod
+    def from_string(cls, date_string: str):
+        year, month, day = date_string.split("-")
+        return cls(int(year),int(month),int(day))
 
 
-def fetch_data_from_api_for_date(date):
+def fetch_data_from_api_for_date_string(date: str):
     '''
     Fetch BMRS Imbalance data from Elexon Insights API for a given settlement date.
 
@@ -26,8 +47,25 @@ def fetch_data_from_api_for_date(date):
         print("Error: ", response.status_code)
         return None
     
+def fetch_data_from_api_for_date(date: Date):
+    '''
+    Fetch BMRS Imbalance data from Elexon Insights API for a given settlement date.
 
-def generate_expected_start_times(date):
+    Parameters:
+    date : Date
+        The settlement date for which to fetch the data as Date class.
+
+    Returns:
+    pd.DataFrame or None
+        A Pandas DataFrame containing the system price data for the specified 
+        date if the request was successful; otherwise, returns None.
+    '''
+
+    date_string = date.to_string()
+    return fetch_data_from_api_for_date_string(date_string)
+
+
+def generate_expected_start_times(date: str):
     '''
     Generate series of expected settlement period start times for given date.
 
@@ -48,8 +86,9 @@ def generate_expected_start_times(date):
     return date_series
 
 
-date = "2024-04-01"
-df = fetch_data_from_api_for_date(date)
+
+date_string = "2024-04-01"
+df = fetch_data_from_api_for_date_string(date_string)
 filtered_data = df[['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']]
 
 # Some settlementDates are missing settlementPeriods and/or contain settlementPeriods from the previous date
@@ -67,7 +106,6 @@ filtered_data = filtered_data[filtered_data['startTime'].isin(expected_start_tim
 missing_times = expected_start_times[~expected_start_times.isin(filtered_data['startTime'])]
 
 if len(missing_times) > 0 :
-    date_Date = datetime.strptime(date, "%Y-%m-%d")
-    yesterday = date_Date - timedelta(days=1)
-
+    date = Date.from_string(date_string)
+    # yesterday = date.yesterday()
 
