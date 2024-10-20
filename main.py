@@ -102,7 +102,7 @@ def transform_date_columns_to_datetime(df):
     return df
 
 
-date_string = "2024-04-01"
+date_string = "2024-03-31"
 columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
 df = fetch_data_from_api_for_date_string(date_string)
 
@@ -134,9 +134,23 @@ if len(missing_times) > 0 :
 
 
 combined_df = pd.concat([yesterday_df, filtered_data, tomorrow_df], axis = 0)
-
-
 print(combined_df)
-plt.figure(figsize=(10, 5))  
-plt.plot(combined_df['startTime'], combined_df['systemSellPrice'], label='systemSellPrice', marker='x') 
+# combined_df['Time'] = combined_df['startTime'].dt.hour.astype(str) + ":" + combined_df['startTime'].dt.minute.astype(str)
+combined_df['Time'] = combined_df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
+
+print(type(combined_df['startTime'].iloc[0]))
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(20, 15)) 
+ax1.plot(combined_df['Time'], combined_df['systemSellPrice'], label='systemSellPrice', marker='x') 
+ax1.set_title(f"System Sell Price on {date_string}")
+ax1.set_ylabel("£/MWh")
+ax1.set_xlabel("Settlement Period Start Time")
+for label in ax1.get_xticklabels():
+    label.set_rotation(45)
+ax2.plot(combined_df['Time'], combined_df['systemBuyPrice'], label='systemBuyPrice', marker='x') 
+ax2.set_title(f"System Buy Price on {date_string}")
+ax2.set_ylabel("£/MWh")
+ax2.set_xlabel("Settlement Period Start Time")
+for label in ax2.get_xticklabels():
+    label.set_rotation(45)
+fig.tight_layout() 
 plt.show()
