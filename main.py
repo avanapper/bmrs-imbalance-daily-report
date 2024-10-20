@@ -1,6 +1,6 @@
 import requests
 import pandas as pd 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class Date:
 
@@ -13,15 +13,23 @@ class Date:
         return f"{self.year}-{self.month:02d}-{self.day:02d}"
 
     def yesterday(self):
-        pass
+        today = datetime(self.year, self.month, self.day)
+        yesterday = today - timedelta(days=1)
+        return Date.from_datetime(yesterday)
 
-    def tomorow(self):
-        pass
+    def tomorrow(self):
+        today = datetime(self.year, self.month, self.day)
+        tomorrow = today + timedelta(days=1)
+        return Date.from_datetime(tomorrow)
 
     @classmethod
     def from_string(cls, date_string: str):
         year, month, day = date_string.split("-")
         return cls(int(year),int(month),int(day))
+
+    @classmethod
+    def from_datetime(cls, date_time: datetime):
+        return cls(date_time.year, date_time.month, date_time.day)
 
 
 def fetch_data_from_api_for_date_string(date: str):
@@ -86,20 +94,21 @@ def generate_expected_start_times(date: str):
     return date_series
 
 
+def transform_date_columns_to_datetime(df):
+
+    date_columns = ['settlementDate', 'startTime', 'createdDateTime']
+    df[date_columns] = df[date_columns].apply(pd.to_datetime)
+    return df
+
 
 date_string = "2024-04-01"
+columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
 df = fetch_data_from_api_for_date_string(date_string)
-filtered_data = df[['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']]
+filtered_data = df[columns_of_interest]
+filtered_data = transform_date_columns_to_datetime(filtered_data)
 
-# Some settlementDates are missing settlementPeriods and/or contain settlementPeriods from the previous date
-# 1. Remove entries where startTime doesn't match the settlementDate -- done
-# 2. Bring in the missing settlement Periods
 
-filtered_data['startTime'] = pd.to_datetime(filtered_data['startTime'])
-filtered_data['createdDateTime'] = pd.to_datetime(filtered_data['createdDateTime'])
-filtered_data['settlementDate'] = pd.to_datetime(filtered_data['settlementDate'])
-
-expected_start_times = generate_expected_start_times(date)
+expected_start_times = generate_expected_start_times(date_string)
 
 filtered_data = filtered_data[filtered_data['startTime'].isin(expected_start_times)]
 
@@ -107,5 +116,21 @@ missing_times = expected_start_times[~expected_start_times.isin(filtered_data['s
 
 if len(missing_times) > 0 :
     date = Date.from_string(date_string)
-    # yesterday = date.yesterday()
+    yesterday = date.yesterday()
+
+    yesterday_df = fetch_data_from_api_for_date(yesterday)
+    yesterday_df = yesterday_df[columns_of_interest]
+    yesterday_df = transform_date_columns_to_datetime(yesterday_df)
+
+    yesterday_df = yesterday_df[yesterday_df['startTime'].isin(missing_times)]
+
+    tomorrow = date.tomorrow()
+    tomorrow_df = fetch_data_from_api_for_date(tomorrow)
+    tomorrow_df = tomorrow_df[columns_of_interest]
+    tomorrow_df = transform_date_columns_to_datetime(tomorrow_df)
+
+    tomorrow_df = tomorrow_df[tomorrow_df['startTime'].isin(missing_times)]
+
+
+combined_df = pd.concat([yesterday_df, filtered_data, tomorrow_df], axis = 0)
 
