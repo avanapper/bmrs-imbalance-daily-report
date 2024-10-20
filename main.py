@@ -1,6 +1,7 @@
 import requests
 import pandas as pd 
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
 
 class Date:
 
@@ -87,9 +88,9 @@ def generate_expected_start_times(date: str):
     '''
     start = f'{date} 00:00:00'  
     end = f'{date} 23:30:00'    
-    interval = '0.5H'                     
+    interval = '0.5h'                     
 
-    date_series = pd.date_range(start = start, end = end, freq = interval)
+    date_series = pd.date_range(start = start, end = end, freq = interval, tz='UTC')
 
     return date_series
 
@@ -104,12 +105,12 @@ def transform_date_columns_to_datetime(df):
 date_string = "2024-04-01"
 columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
 df = fetch_data_from_api_for_date_string(date_string)
+
 filtered_data = df[columns_of_interest]
+
 filtered_data = transform_date_columns_to_datetime(filtered_data)
 
-
 expected_start_times = generate_expected_start_times(date_string)
-
 filtered_data = filtered_data[filtered_data['startTime'].isin(expected_start_times)]
 
 missing_times = expected_start_times[~expected_start_times.isin(filtered_data['startTime'])]
@@ -134,3 +135,8 @@ if len(missing_times) > 0 :
 
 combined_df = pd.concat([yesterday_df, filtered_data, tomorrow_df], axis = 0)
 
+
+print(combined_df)
+plt.figure(figsize=(10, 5))  
+plt.plot(combined_df['startTime'], combined_df['systemSellPrice'], label='systemSellPrice', marker='x') 
+plt.show()
