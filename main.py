@@ -102,7 +102,7 @@ def transform_date_columns_to_datetime(df):
     return df
 
 
-date_string = "2024-03-31"
+date_string = "2024-08-01"
 columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
 df = fetch_data_from_api_for_date_string(date_string)
 
@@ -134,11 +134,11 @@ if len(missing_times) > 0 :
 
 
 combined_df = pd.concat([yesterday_df, filtered_data, tomorrow_df], axis = 0)
-print(combined_df)
-# combined_df['Time'] = combined_df['startTime'].dt.hour.astype(str) + ":" + combined_df['startTime'].dt.minute.astype(str)
-combined_df['Time'] = combined_df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
 
-print(type(combined_df['startTime'].iloc[0]))
+
+combined_df['Time'] = combined_df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
+combined_df = combined_df.reset_index(drop = True)
+# print(combined_df)
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(20, 15)) 
 ax1.plot(combined_df['Time'], combined_df['systemSellPrice'], label='systemSellPrice', marker='x') 
 ax1.set_title(f"System Sell Price on {date_string}")
@@ -154,3 +154,6 @@ for label in ax2.get_xticklabels():
     label.set_rotation(45)
 fig.tight_layout() 
 plt.show()
+
+
+highest_imbalance_vol_time = combined_df['startTime'].iloc[combined_df['netImbalanceVolume'].idxmax()]
