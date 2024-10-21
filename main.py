@@ -98,41 +98,57 @@ def generate_expected_start_times(date: str):
 
 
 def transform_date_columns_to_datetime(df):
-
     date_columns = ['settlementDate', 'startTime', 'createdDateTime']
     df[date_columns] = df[date_columns].apply(pd.to_datetime)
     return df
 
 
+def fetch_and_transform_data_for_date_string(date_string : str):
+    """
+    Fetch data from an API for a specific date and transform the relevant columns.
+
+    This function retrieves data using the provided date string (in format yyyy-MM-dd), 
+    filters the DataFrame to include only columns of interest, 
+    and converts the specific date columns to datetime format.
+
+    Parameters:
+    date_string: str 
+        The date string used to fetch data from the API, format yyyy-MM-dd
+
+    Returns:
+    pandas.DataFrame: 
+        A DataFrame containing the filtered and transformed data, 
+        with relevant date columns converted to datetime format.
+    """
+    
+    df = fetch_data_from_api_for_date_string(date_string)
+
+    columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
+    filtered_data = df[columns_of_interest]
+
+    transformed_data = transform_date_columns_to_datetime(filtered_data)
+    
+    return transformed_data
+
+
 date_string = "2024-08-01"
-columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
-
-df = fetch_data_from_api_for_date_string(date_string)
-
-filtered_data = df[columns_of_interest]
-
-filtered_data = transform_date_columns_to_datetime(filtered_data)
-print(filtered_data.dtypes)
+df = fetch_and_transform_data_for_date_string(date_string)
 
 expected_start_times = generate_expected_start_times(date_string)
-filtered_data = filtered_data[filtered_data['startTime'].isin(expected_start_times)]
+filtered_data = df[df['startTime'].isin(expected_start_times)]
 
-missing_times = expected_start_times[~expected_start_times.isin(filtered_data['startTime'])]
+missing_times = expected_start_times[~expected_start_times.isin(df['startTime'])]
 
 if len(missing_times) > 0 :
     date = Date.from_string(date_string)
     yesterday = date.yesterday()
 
-    yesterday_df = fetch_data_from_api_for_date(yesterday)
-    yesterday_df = yesterday_df[columns_of_interest]
-    yesterday_df = transform_date_columns_to_datetime(yesterday_df)
+    yesterday_df = fetch_and_transform_data_for_date_string(yesterday.to_string())
 
     yesterday_df = yesterday_df[yesterday_df['startTime'].isin(missing_times)]
 
     tomorrow = date.tomorrow()
-    tomorrow_df = fetch_data_from_api_for_date(tomorrow)
-    tomorrow_df = tomorrow_df[columns_of_interest]
-    tomorrow_df = transform_date_columns_to_datetime(tomorrow_df)
+    tomorrow_df = fetch_and_transform_data_for_date_string(tomorrow.to_string())
 
     tomorrow_df = tomorrow_df[tomorrow_df['startTime'].isin(missing_times)]
 
