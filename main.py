@@ -2,6 +2,7 @@ import requests
 import pandas as pd 
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
+import numpy as np
 
 class Date:
 
@@ -95,6 +96,7 @@ def generate_expected_start_times(date: str):
     return date_series
 
 
+
 def transform_date_columns_to_datetime(df):
 
     date_columns = ['settlementDate', 'startTime', 'createdDateTime']
@@ -104,11 +106,13 @@ def transform_date_columns_to_datetime(df):
 
 date_string = "2024-08-01"
 columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
+
 df = fetch_data_from_api_for_date_string(date_string)
 
 filtered_data = df[columns_of_interest]
 
 filtered_data = transform_date_columns_to_datetime(filtered_data)
+print(filtered_data.dtypes)
 
 expected_start_times = generate_expected_start_times(date_string)
 filtered_data = filtered_data[filtered_data['startTime'].isin(expected_start_times)]
@@ -155,5 +159,19 @@ for label in ax2.get_xticklabels():
 fig.tight_layout() 
 plt.show()
 
+# Total daily imbalance cost 
+# NIV > 0: system is short
+combined_df['ImbalanceCost'] = np.where(combined_df['netImbalanceVolume'] > 0, combined_df['netImbalanceVolume'] * combined_df['systemSellPrice'], combined_df['netImbalanceVolume'] * combined_df['systemBuyPrice'])
+total_imbalance_cost = combined_df['ImbalanceCost'].sum()
+print(f"Total Daily Imbalance Cost = {total_imbalance_cost}")
 
+# Print hour containing half hour slot with highest net imbalance volume
 highest_imbalance_vol_time = combined_df['startTime'].iloc[combined_df['netImbalanceVolume'].idxmax()]
+highest_imbalance_vol_hour = highest_imbalance_vol_time.hour
+print(highest_imbalance_vol_hour)
+
+# Print hour with highest sum of net imabalnce volumes (over the 2 half hour slots within the hour)
+combined_df['Hour'] = combined_df['startTime'].dt.hour
+grouped_df = combined_df.groupby('Hour')['netImbalanceVolume'].sum()
+
+print(grouped_df.idxmax())
