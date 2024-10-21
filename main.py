@@ -131,6 +131,48 @@ def fetch_and_transform_data_for_date_string(date_string : str):
     return transformed_data
 
 
+def add_missing_settlement_periods(settlement_date : str, settlement_date_df : pd.DataFrame, missing_settlement_times):
+    """
+    Fetch data for missing settlement periods by checking previous and next settlement dates in API.
+    Combine with data saved under correct settlement date.
+
+    This function retrieves data for the previous and following days, 
+    and checks if any of the periods belong to the required settlment date. 
+    It combines the DataFrames into a single DataFrame for further analysis.
+
+    Parameters:
+    settlement_date : str 
+        A string representing the settlement date in the format 'YYYY-MM-DD' 
+        to fetch the missing data for. 
+
+    settlement_date_df : pd.DataFrame
+        A DataFrame containing the non missing data for the settlement date, 
+        which will be included in the combined DataFrame.
+
+    missing_settlement_times :
+        Used to filter the data for previous and next settlment dates,
+        to entries that belong to the specified settlement_date
+
+    Returns:
+    pandas.DataFrame: 
+        A DataFrame containing the combined data for the settlement date. 
+        Note it is not guaranteed that all settlement periods were found
+    """
+    date = Date.from_string(date_string)
+
+    yesterday_df = fetch_and_transform_data_for_date_string(date.yesterday().to_string())
+
+    misplaced_periods_yesterday = yesterday_df[yesterday_df['startTime'].isin(missing_settlement_times)]
+
+    tomorrow_df = fetch_and_transform_data_for_date_string(date.tomorrow().to_string())
+
+    misplaced_periods_tomorrow = tomorrow_df[tomorrow_df['startTime'].isin(missing_settlement_times)]
+
+    combined_df = pd.concat([misplaced_periods_yesterday, settlement_date_df, misplaced_periods_tomorrow], axis = 0)
+
+    return combined_df
+
+
 date_string = "2024-08-01"
 df = fetch_and_transform_data_for_date_string(date_string)
 
@@ -140,20 +182,7 @@ filtered_data = df[df['startTime'].isin(expected_start_times)]
 missing_times = expected_start_times[~expected_start_times.isin(df['startTime'])]
 
 if len(missing_times) > 0 :
-    date = Date.from_string(date_string)
-    yesterday = date.yesterday()
-
-    yesterday_df = fetch_and_transform_data_for_date_string(yesterday.to_string())
-
-    yesterday_df = yesterday_df[yesterday_df['startTime'].isin(missing_times)]
-
-    tomorrow = date.tomorrow()
-    tomorrow_df = fetch_and_transform_data_for_date_string(tomorrow.to_string())
-
-    tomorrow_df = tomorrow_df[tomorrow_df['startTime'].isin(missing_times)]
-
-
-combined_df = pd.concat([yesterday_df, filtered_data, tomorrow_df], axis = 0)
+    combined_df = add_missing_settlement_periods(date_string, filtered_data, missing_times)
 
 
 combined_df['Time'] = combined_df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
