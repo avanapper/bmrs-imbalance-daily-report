@@ -103,6 +103,7 @@ def transform_date_columns_to_datetime(df):
     return df
 
 
+
 def fetch_and_transform_data_for_date_string(date_string : str):
     """
     Fetch data from an API for a specific date and transform the relevant columns.
@@ -173,21 +174,59 @@ def add_missing_settlement_periods(settlement_date : str, settlement_date_df : p
     return combined_df
 
 
+def clean_data(date_string, df):
+    """
+    Clean and filter settlement data based on expected start times for a given date.
+
+    This function generates expected settlement period start times for the specified date, 
+    filters the provided DataFrame to include only entries where the 
+    'startTime' matches the expected values. If there are missing settlement periods, 
+    it adds these to the filtered DataFrame. 
+    The function will also print a warning if there are still missing 
+    settlement periods after attempting to add them.
+
+    Parameters:
+    date_string : str
+        A string representing the date in the format 'yyyy-MM-dd' 
+        for which to clean and filter the settlement data.
+    df : pd.DataFrame 
+        A DataFrame containing the settlement data that needs to be cleaned.
+
+    Returns:
+    pandas.DataFrame: 
+        A DataFrame containing only the filtered settlement data 
+        that matches the expected start times, with missing periods 
+        added if necessary.
+
+    """
+
+    expected_start_times = generate_expected_start_times(date_string)
+    filtered_data = df[df['startTime'].isin(expected_start_times)]
+
+    missing_times = expected_start_times[~expected_start_times.isin(df['startTime'])]
+
+    if len(missing_times) > 0 :
+        filtered_data = add_missing_settlement_periods(date_string, filtered_data, missing_times)
+
+        missing_times = expected_start_times[~expected_start_times.isin(df['startTime'])]
+        if len(missing_times) > 0:
+            print("Settlement date is missing settlement periods.")
+
+    return filtered_data
+
+
+
+
+
 date_string = "2024-08-01"
 df = fetch_and_transform_data_for_date_string(date_string)
 
-expected_start_times = generate_expected_start_times(date_string)
-filtered_data = df[df['startTime'].isin(expected_start_times)]
-
-missing_times = expected_start_times[~expected_start_times.isin(df['startTime'])]
-
-if len(missing_times) > 0 :
-    combined_df = add_missing_settlement_periods(date_string, filtered_data, missing_times)
-
+combined_df = clean_data(date_string, df)
 
 combined_df['Time'] = combined_df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
 combined_df = combined_df.reset_index(drop = True)
-# print(combined_df)
+
+
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(20, 15)) 
 ax1.plot(combined_df['Time'], combined_df['systemSellPrice'], label='systemSellPrice', marker='x') 
 ax1.set_title(f"System Sell Price on {date_string}")
