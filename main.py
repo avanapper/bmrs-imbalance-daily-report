@@ -117,19 +117,22 @@ def fetch_and_transform_data_for_date_string(date_string : str):
         The date string used to fetch data from the API, format yyyy-MM-dd
 
     Returns:
-    pandas.DataFrame: 
+    pandas.DataFrame or None: 
         A DataFrame containing the filtered and transformed data, 
         with relevant date columns converted to datetime format.
     """
     
     df = fetch_data_from_api_for_date_string(date_string)
-
-    columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
-    filtered_data = df[columns_of_interest]
-
-    transformed_data = transform_date_columns_to_datetime(filtered_data)
     
-    return transformed_data
+    if df is not None and df.shape[0] > 0:
+        columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
+        filtered_data = df[columns_of_interest]
+
+        transformed_data = transform_date_columns_to_datetime(filtered_data)
+
+        return transformed_data
+    
+    return None
 
 
 def add_missing_settlement_periods(settlement_date : str, settlement_date_df : pd.DataFrame, missing_settlement_times):
@@ -166,11 +169,20 @@ def add_missing_settlement_periods(settlement_date : str, settlement_date_df : p
     misplaced_periods_yesterday = yesterday_df[yesterday_df['startTime'].isin(missing_settlement_times)]
 
     tomorrow_df = fetch_and_transform_data_for_date_string(date.tomorrow().to_string())
+    
+    if tomorrow_df is not None and df.shape[0] > 0:
+        misplaced_periods_tomorrow = tomorrow_df[tomorrow_df['startTime'].isin(missing_settlement_times)]
 
-    misplaced_periods_tomorrow = tomorrow_df[tomorrow_df['startTime'].isin(missing_settlement_times)]
+        if misplaced_periods_yesterday.shape[0] > 0:
+            combined_df = pd.concat([misplaced_periods_yesterday, settlement_date_df, misplaced_periods_tomorrow], axis = 0)
+        else:
+            combined_df = pd.concat([settlement_date_df, misplaced_periods_tomorrow], axis = 0)
 
-    combined_df = pd.concat([misplaced_periods_yesterday, settlement_date_df, misplaced_periods_tomorrow], axis = 0)
-
+    elif misplaced_periods_yesterday.shape[0] > 0:
+        combined_df = pd.concat([misplaced_periods_yesterday, settlement_date_df], axis = 0)
+    else:
+        combined_df = settlement_date_df
+    
     return combined_df
 
 
@@ -218,44 +230,50 @@ def clean_data(date_string, df):
 
 
 
-date_string = "2024-08-01"
+date_string = "2024-03-31"
 df = fetch_and_transform_data_for_date_string(date_string)
+# combined_df = df
 
 combined_df = clean_data(date_string, df)
 
 combined_df['Time'] = combined_df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
+# NIV > 0: system is short
+combined_df['ImbalanceCost'] = np.where(combined_df['netImbalanceVolume'] > 0, combined_df['netImbalanceVolume'] * combined_df['systemSellPrice'], combined_df['netImbalanceVolume'] * combined_df['systemBuyPrice'])
 combined_df = combined_df.reset_index(drop = True)
 
-
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(20, 15)) 
+# System Sell price and System Buy price are equal
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(20, 10)) 
 ax1.plot(combined_df['Time'], combined_df['systemSellPrice'], label='systemSellPrice', marker='x') 
 ax1.set_title(f"System Sell Price on {date_string}")
 ax1.set_ylabel("£/MWh")
 ax1.set_xlabel("Settlement Period Start Time")
 for label in ax1.get_xticklabels():
     label.set_rotation(45)
-ax2.plot(combined_df['Time'], combined_df['systemBuyPrice'], label='systemBuyPrice', marker='x') 
-ax2.set_title(f"System Buy Price on {date_string}")
-ax2.set_ylabel("£/MWh")
+ax2.plot(combined_df['Time'], combined_df['ImbalanceCost'], label='ImbalanceCost', marker='x') 
+ax2.set_title(f"Imbalance Cost on {date_string}")
+ax2.set_ylabel("£")
 ax2.set_xlabel("Settlement Period Start Time")
 for label in ax2.get_xticklabels():
     label.set_rotation(45)
+
 fig.tight_layout() 
 plt.show()
 
+
 # Total daily imbalance cost 
-# NIV > 0: system is short
-combined_df['ImbalanceCost'] = np.where(combined_df['netImbalanceVolume'] > 0, combined_df['netImbalanceVolume'] * combined_df['systemSellPrice'], combined_df['netImbalanceVolume'] * combined_df['systemBuyPrice'])
 total_imbalance_cost = combined_df['ImbalanceCost'].sum()
 print(f"Total Daily Imbalance Cost = {total_imbalance_cost}")
 
-# Print hour containing half hour slot with highest net imbalance volume
-highest_imbalance_vol_time = combined_df['startTime'].iloc[combined_df['netImbalanceVolume'].idxmax()]
+
+combined_df['absNetImbalanceVolume'] = combined_df['netImbalanceVolume'].apply(abs)
+
+
+# Print hour containing half hour slot with highest absolute imbalance imbalance volume
+highest_imbalance_vol_time = combined_df['startTime'].iloc[combined_df['absNetImbalanceVolume'].idxmax()]
 highest_imbalance_vol_hour = highest_imbalance_vol_time.hour
-print(highest_imbalance_vol_hour)
-
-# Print hour with highest sum of net imabalnce volumes (over the 2 half hour slots within the hour)
+print(f"Hour with highest absolute imbalance volumes (containing half hour slot with highest absolute imbalance imbalance volume): {highest_imbalance_vol_hour}")
+# Print hour with highest sum of absolute imbalance volumes (over the 2 half hour slots within the hour)
 combined_df['Hour'] = combined_df['startTime'].dt.hour
-grouped_df = combined_df.groupby('Hour')['netImbalanceVolume'].sum()
+grouped_df = combined_df.groupby('Hour')['absNetImbalanceVolume'].sum()
 
-print(grouped_df.idxmax())
+print(f"Hour with highest absolute imbalance volumes (sum over the 2 half hour settlement periods): {grouped_df.idxmax()}")
