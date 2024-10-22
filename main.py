@@ -43,11 +43,13 @@ def fetch_data_from_api_for_date_string(date: str) -> pd.DataFrame | None:
     Parameters:
     date : str
         The settlement date for which to fetch the data, formatted as 'yyyy-mm-dd'.
+        The settlement date is in local time, i.e Greenwich Mean Time (GMT) or British Summer Time (BST).
 
     Returns:
     pd.DataFrame or None
         A Pandas DataFrame containing the system price data for the specified 
-        date if the request was successful; otherwise, returns None.
+        date if the request was successful; otherwise, returns None. 
+        Columns containing times are in Coordinated Universal Time (UTC).
     '''
     response = requests.get(f"https://data.elexon.co.uk/bmrs/api/v1/balancing/settlement/system-prices/{date}?format=json")
 
@@ -147,7 +149,7 @@ def add_missing_settlement_periods(settlement_date : str, settlement_date_df : p
     Parameters:
     settlement_date : str 
         A string representing the settlement date in the format 'yyyy-mm-dd' 
-        to fetch the missing data for. 
+        to fetch the missing data for, this is in local timezone. 
 
     settlement_date_df : pd.DataFrame
         A DataFrame containing the non missing data for the settlement date, 
@@ -186,31 +188,7 @@ def add_missing_settlement_periods(settlement_date : str, settlement_date_df : p
     return combined_df
 
 
-def clean_data(date_string : str, df : pd.DataFrame) -> pd.DataFrame:
-    """
-    Clean and filter settlement data based on expected start times for a given date.
-
-    This function generates expected settlement period start times for the specified date, 
-    filters the provided DataFrame to include only entries where the 
-    'startTime' matches the expected values. If there are missing settlement periods, 
-    it adds these to the filtered DataFrame. 
-    The function will also print a warning if there are still missing 
-    settlement periods after attempting to add them.
-
-    Parameters:
-    date_string : str
-        A string representing the date in the format 'yyyy-mm-dd' 
-        for which to clean and filter the settlement data.
-    df : pd.DataFrame 
-        A DataFrame containing the settlement data that needs to be cleaned.
-
-    Returns:
-    pd.DataFrame: 
-        A DataFrame containing only the filtered settlement data 
-        that matches the expected start times, with missing periods 
-        added if necessary.
-
-    """
+def switch_timezone_to_utc(date_string : str, df : pd.DataFrame) -> pd.DataFrame:
 
     expected_start_times = generate_expected_start_times(date_string)
     filtered_data = df[df['startTime'].isin(expected_start_times)]
@@ -229,73 +207,159 @@ def clean_data(date_string : str, df : pd.DataFrame) -> pd.DataFrame:
 
 
 def generate_price_and_imbalance_cost_plots_from_dataframe(settlement_date : str, df : pd.DataFrame) -> None:
+    df['Time'] = df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
+
     return generate_price_and_imbalance_cost_plots(settlement_date, df['Time'], df['systemSellPrice'], df['ImbalanceCost'])
 
 def generate_price_and_imbalance_cost_plots(settlement_date : str, time: Iterable[float], sell_price: Iterable[float], imbalance_cost: Iterable[float],) -> None:
+
+    max_price = max(sell_price)
+    max_price_time = time[sell_price.idxmax()]
+
+    max_imbalance_cost = max(imbalance_cost)
+    max_imbalance_cost_time = time[imbalance_cost.idxmax()]
+
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(20, 10)) 
     ax1.plot(time, sell_price, label='System Price', marker='x') 
     ax1.set_title(f"System Price on {settlement_date}")
     ax1.set_ylabel("£/MWh")
-    ax1.set_xlabel("Settlement Period Start Time")
+    ax1.set_xlabel("Settlement Period Start Time (UTC)")
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.annotate(f'Max: £{np.round(max_price, 2):,.2f}', xy=(max_price_time, max_price), xytext=(max_price_time, max_price * 1.1),
+                 arrowprops=dict(facecolor='black', arrowstyle='->'), fontsize=10, color='b')
     for label in ax1.get_xticklabels():
         label.set_rotation(45)
+
     ax2.plot(time, imbalance_cost, label='ImbalanceCost', marker='x') 
     ax2.set_title(f"Imbalance Cost on {settlement_date}")
     ax2.set_ylabel("£")
-    ax2.set_xlabel("Settlement Period Start Time")
+    ax2.set_xlabel("Settlement Period Start Time (UTC)")
+    ax2.grid(True, linestyle='--', alpha=0.7)
     for label in ax2.get_xticklabels():
         label.set_rotation(45)
+    ax2.annotate(f'Max: £{np.round(max_imbalance_cost, 2):,.2f}', xy=(max_imbalance_cost_time, max_imbalance_cost), xytext=(max_imbalance_cost_time, max_imbalance_cost * 1.1),
+            arrowprops=dict(facecolor='black', arrowstyle='->'), fontsize=10, color='b')
+
+
+
 
     fig.tight_layout() 
     plt.show()
 
+def generate_max_abs_imbalance_volume_hour(df : pd.DataFrame) -> tuple:
+    """
+    Identifies the hour (UTC) with the highest absolute imbalance volumes from the given DataFrame.
 
-def generate_max_abs_imbalance_volume_hour(df : pd.DataFrame) -> str:
+    This function extracts the hour from the 'startTime' column, calculates the absolute values of the
+    'netImbalanceVolume' column, and groups the DataFrame by hour to sum the absolute imbalance volumes.
+    It then identifies the hour with the highest imbalance volume and returns both the hour and the volume.
+
+    Parameters:
+    df : pd.DataFrame
+        A Pandas DataFrame containing the imbalance data, where:
+        - 'startTime' column contains datetime objects representing the start time of each settlement period.
+        - 'netImbalanceVolume' column contains the net imbalance volume (in MWh) for each period.
+
+    Returns:
+    tuple
+        A tuple containing:
+        - int: The hour (0-23) (UTC) with the highest absolute imbalance volume.
+        - float: The maximum absolute imbalance volume (in MWh).
+
+    Note: If local timezone is BST, the UTC hours follow the order from 23, 0, 1, ..., 22, not 0-23
+    """
+
     df['Hour'] = df['startTime'].dt.hour
+    df['absNetImbalanceVolume'] = df['netImbalanceVolume'].apply(abs)
     grouped_df = df.groupby('Hour')['absNetImbalanceVolume'].sum()
+    return(grouped_df.idxmax(), grouped_df.max())
 
-    if (grouped_df.idxmax() < 12):
+
+def report_max_abs_imbalance_volume_hour(df : pd.DataFrame) -> None:
+    """
+    Reports the hour with the highest absolute net imbalance volume in a 12-hour AM/PM format (UTC), and the volume.
+
+    Parameters:
+    df : pd.DataFrame
+        A Pandas DataFrame containing the imbalance data, where:
+        - 'startTime' column contains datetime objects representing the start time of each settlement period.
+        - 'netImbalanceVolume' column contains the net imbalance volume (in MWh) for each period.
+
+    Returns:
+    None
+        This function prints the hour with the highest absolute imbalance volume and the volume and does not return any value.
+    """
+    max_hour, max_val = generate_max_abs_imbalance_volume_hour(df)
+
+    if (max_hour < 12):
         am_pm = "am"
     else:
         am_pm = "pm"
 
-    max_hour = grouped_df.idxmax() % 12
+    max_hour = max_hour % 12
     if max_hour == 0:
         max_hour = 12
 
-    return(f"Hour with highest absolute imbalance volumes (sum over the 2 half hour settlement periods): {max_hour}{am_pm} (UTC)",
-            f"with absolute imbalance volume of {np.round(grouped_df.max(), 2)} MWh")
+    print(f"Hour with highest absolute imbalance volumes: {max_hour}{am_pm} (UTC),",
+            f"with net absolute imbalance volume of {np.round(max_val, 2)} MWh")
 
-def output_report_and_plots_for_date(date: str) -> None:
-    df = fetch_and_transform_data_for_date_string(date)
 
-    combined_df = clean_data(date, df)
+def generate_max_abs_imbalance_volume_period_hour() -> tuple:
+    """
+    Identifies the hour (UTC) containing the settlement period of the highest absolute imbalance volume from the given DataFrame.
 
-    combined_df['Time'] = combined_df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
+    Parameters:
+    df : pd.DataFrame
+        A Pandas DataFrame containing the imbalance data, where:
+        - 'startTime' column contains datetime objects representing the start time of each settlement period.
+        - 'netImbalanceVolume' column contains the net imbalance volume (in MWh) for each period.
 
+    Returns:
+    tuple
+        A tuple containing:
+        - int: The hour (0-23) (UTC) with the highest absolute imbalance volume.
+        - float: The maximum absolute imbalance volume (in MWh).
+
+    Note: If local timezone is BST, the UTC hours follow the order from 23, 0, 1, ..., 22, not 0-23
+    """
+    df['absNetImbalanceVolume'] = df['netImbalanceVolume'].apply(abs)
+    df = df.reset_index(drop = True)
+
+    max_abs_imbalance_vol_time = df['startTime'].iloc[df['absNetImbalanceVolume'].idxmax()]
+    max_abs_imbalance_vol_hour = max_abs_imbalance_vol_time.hour
+    max_abs_vol = df['absNetImbalanceVolume'].max()
+
+    return(max_abs_imbalance_vol_hour, max_abs_vol)
+
+
+def calculate_total_imbalance_cost(df : pd.DataFrame) -> float:
     # NIV = Net Imbalance Volume
     # NIV > 0 means system is short
-    combined_df['ImbalanceCost'] = np.where(combined_df['netImbalanceVolume'] > 0, combined_df['netImbalanceVolume'] * combined_df['systemSellPrice'], combined_df['netImbalanceVolume'] * combined_df['systemBuyPrice'])
-    combined_df = combined_df.reset_index(drop = True)
+    df['ImbalanceCost'] = np.where(df['netImbalanceVolume'] > 0, df['netImbalanceVolume'] * df['systemSellPrice'], df['netImbalanceVolume'] * df['systemBuyPrice'])
 
-    total_imbalance_cost = combined_df['ImbalanceCost'].sum()
-    print(f"Total Daily Imbalance Cost = £{np.round(total_imbalance_cost, 2)}")
+    total_imbalance_cost = df['ImbalanceCost'].sum()
 
-    combined_df['absNetImbalanceVolume'] = combined_df['netImbalanceVolume'].apply(abs)
-
-    # Print hour containing half hour slot with highest absolute imbalance volume
-    highest_imbalance_vol_time = combined_df['startTime'].iloc[combined_df['absNetImbalanceVolume'].idxmax()]
-    highest_imbalance_vol_hour = highest_imbalance_vol_time.hour
-    print(f"Hour with highest absolute imbalance volumes (containing half hour slot with highest absolute imbalance imbalance volume): {highest_imbalance_vol_hour}")
-
-    
-    # Print hour with highest sum of absolute imbalance volumes (over the 2 half hour slots within the hour)
-    print(generate_max_abs_imbalance_volume_hour(combined_df))
+    return total_imbalance_cost
 
 
-    generate_price_and_imbalance_cost_plots_from_dataframe(date, combined_df)
+def report_total_imbalance_cost(df : pd.DataFrame) -> None:
+
+    print(f"Total Daily Imbalance Cost = £{np.round(calculate_total_imbalance_cost(df), 2):,.2f}")
+
+
+def output_report_and_plots_for_date(date: str, use_local_timezone: bool) -> None:
+    df = fetch_and_transform_data_for_date_string(date)
+
+    if not use_local_timezone:
+        df = switch_timezone_to_utc(date, df)
+        
+    report_total_imbalance_cost(df)
+
+    report_max_abs_imbalance_volume_hour(df)
+
+    generate_price_and_imbalance_cost_plots_from_dataframe(date, df)
 
 
 if __name__ == "__main__":
-    date_string = "2024-03-31"
-    output_report_and_plots_for_date(date_string)
+    date_string = "2024-10-15"
+    output_report_and_plots_for_date(date_string, use_local_timezone=True)
