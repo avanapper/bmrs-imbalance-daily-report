@@ -6,6 +6,8 @@ import requests
 from typing import Iterable
 from datetime import datetime, timedelta
 
+pd.options.mode.copy_on_write = True
+
 class Date:
 
     def __init__(self, year: int, month: int, day: int) -> None:
@@ -35,6 +37,7 @@ class Date:
     def from_datetime(cls, date_time: datetime) -> 'Date':
         return cls(date_time.year, date_time.month, date_time.day)
 
+
 def fetch_and_transform_data_for_date_string(date_string : str) -> pd.DataFrame | None:
     """
     Fetch data from an API for a specific date and transform the relevant columns.
@@ -55,7 +58,7 @@ def fetch_and_transform_data_for_date_string(date_string : str) -> pd.DataFrame 
     
     df = fetch_data_from_api_for_date_string(date_string)
 
-    if df:
+    if df is not None:
         transformed_data = transform_data_from_api(df)
         return transformed_data
     
@@ -196,16 +199,17 @@ def add_missing_settlement_periods(settlement_date : str, settlement_date_df : p
     misplaced_periods_yesterday = yesterday_df[yesterday_df['startTime'].isin(missing_settlement_times)]
 
     tomorrow_df = fetch_and_transform_data_for_date_string(date.tomorrow().to_string())
-    
+
     if tomorrow_df is not None:
+        
         misplaced_periods_tomorrow = tomorrow_df[tomorrow_df['startTime'].isin(missing_settlement_times)]
 
-        if misplaced_periods_yesterday is not None:
+        if misplaced_periods_yesterday.shape[0] > 0 :
             combined_df = pd.concat([misplaced_periods_yesterday, settlement_date_df, misplaced_periods_tomorrow], axis=0)
         else:
             combined_df = pd.concat([settlement_date_df, misplaced_periods_tomorrow], axis=0)
 
-    elif misplaced_periods_yesterday is not None:
+    elif misplaced_periods_yesterday.shape[0] > 0:
         combined_df = pd.concat([misplaced_periods_yesterday, settlement_date_df], axis=0)
     else:
         combined_df = settlement_date_df
@@ -453,6 +457,7 @@ def output_report_and_plots_for_date(date: str, use_local_timezone: bool) -> Non
     report_max_net_abs_imbalance_volume_hour(df)
 
     generate_price_and_imbalance_cost_plots_from_dataframe(date, df)
+
 
 
 if __name__ == "__main__":

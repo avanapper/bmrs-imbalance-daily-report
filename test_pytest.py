@@ -154,3 +154,4 @@ def test_transform_data_from_api_missing_columns():
 
     with pytest.raises(KeyError):
         transform_data_from_api(sample_df)
+
