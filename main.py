@@ -37,59 +37,7 @@ class Date:
     def from_datetime(cls, date_time: datetime) -> 'Date':
         return cls(date_time.year, date_time.month, date_time.day)
 
-
-def fetch_and_transform_data_for_date_string(date_string : str) -> pd.DataFrame | None:
-    """
-    Fetch data from an API for a specific date and transform the relevant columns.
-
-    This function retrieves data using the provided date string (formatted as 'yyyy-mm-dd'),
-    filters the DataFrame to include only the specified columns of interest, 
-    and converts relevant date columns to datetime format.
-
-    Parameters:
-    date_string : str
-        The date string used to fetch data from the API, formatted as 'yyyy-mm-dd'.
-
-    Returns:
-    pd.DataFrame or None:
-        A DataFrame containing the filtered and transformed data with relevant date columns
-        converted to datetime format if the data was successfully retrieved; otherwise, returns None.
-    """
-    
-    df = fetch_data_from_api_for_date_string(date_string)
-
-    if df is not None:
-        transformed_data = transform_data_from_api(df)
-        return transformed_data
-    
-    return None
-
-
-def transform_data_from_api(df: pd.DataFrame) -> pd.DataFrame | None:
-    """
-    Transform the fetched data from the API by filtering and converting columns.
-
-    This function filters the provided DataFrame to include only the columns of interest
-    related to imbalance data and transforms specific date columns to datetime format.
-
-    Parameters:
-    df : pd.DataFrame
-        A DataFrame containing the raw data fetched from the API. It must contain columns
-        'settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime',
-        'systemSellPrice', 'systemBuyPrice', and 'netImbalanceVolume'.
-
-    Returns:
-    pd.DataFrame or None:
-        A DataFrame containing the filtered and transformed data with relevant date columns
-        converted to datetime format. Returns None if the input DataFrame is empty or invalid.
-    """
-    columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
-    filtered_data = df[columns_of_interest]
-
-    transformed_data = transform_date_columns_to_datetime(filtered_data)
-
-    return transformed_data
-
+## Data retrieval and processing functions
 
 def fetch_data_from_api_for_date_string(date: str) -> pd.DataFrame | None:
     '''
@@ -138,6 +86,101 @@ def fetch_data_from_api_for_date(date: Date) -> pd.DataFrame | None:
     return fetch_data_from_api_for_date_string(date.to_string())
 
 
+def transform_data_from_api(df: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Transform the fetched data from the API by filtering and converting columns.
+
+    This function filters the provided DataFrame to include only the columns of interest
+    related to imbalance data and transforms specific date columns to datetime format.
+
+    Parameters:
+    df : pd.DataFrame
+        A DataFrame containing the raw data fetched from the API. It must contain columns
+        'settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime',
+        'systemSellPrice', 'systemBuyPrice', and 'netImbalanceVolume'.
+
+    Returns:
+    pd.DataFrame or None:
+        A DataFrame containing the filtered and transformed data with relevant date columns
+        converted to datetime format. Returns None if the input DataFrame is empty or invalid.
+    """
+    columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
+    filtered_data = df[columns_of_interest]
+
+    transformed_data = transform_date_columns_to_datetime(filtered_data)
+
+    return transformed_data
+
+
+def fetch_and_transform_data_for_date_string(date_string : str) -> pd.DataFrame | None:
+    """
+    Fetch data from an API for a specific date and transform the relevant columns.
+
+    This function retrieves data using the provided date string (formatted as 'yyyy-mm-dd'),
+    filters the DataFrame to include only the specified columns of interest, 
+    and converts relevant date columns to datetime format.
+
+    Parameters:
+    date_string : str
+        The date string used to fetch data from the API, formatted as 'yyyy-mm-dd'.
+
+    Returns:
+    pd.DataFrame or None:
+        A DataFrame containing the filtered and transformed data with relevant date columns
+        converted to datetime format if the data was successfully retrieved; otherwise, returns None.
+    """
+    
+    df = fetch_data_from_api_for_date_string(date_string)
+
+    if df is not None:
+        transformed_data = transform_data_from_api(df)
+        return transformed_data
+    
+    return None
+
+
+def transform_date_columns_to_datetime(df : pd.DataFrame) -> pd.DataFrame:
+    date_columns = ['settlementDate', 'startTime', 'createdDateTime']
+    df[date_columns] = df[date_columns].apply(pd.to_datetime)
+    return df
+
+
+def switch_timezone_to_utc(date_string : str, df : pd.DataFrame) -> pd.DataFrame:
+    """
+    Adjusts the input dataframe's times to UTC and filters out missing settlement periods.
+
+    Elexon API settlementDate parameter is based on local time (e.g. British Summer Time (BST) during Summer),
+    this function retrieves data based on UTC settlement date (rather than local) 
+    by fetching data for the previous and next day (if possible), 
+    and combining them with the current date's data (filtering out periods that don't match the UTC date).
+
+    Parameters
+    date_string : str
+        The date string in "yyyy-mm-dd" format representing the settlement date.
+    df : pd.DataFrame
+        The input dataframe containing imbalance data with a "startTime" column.
+
+    Returns
+    pd.DataFrame
+        A dataframe filtered to include only expected settlement periods, with any missing periods added if possible.
+    """
+
+    expected_start_times = generate_expected_start_times(date_string)
+    filtered_data = df[df['startTime'].isin(expected_start_times)]
+
+    missing_times = expected_start_times[~expected_start_times.isin(df['startTime'])]
+
+    if len(missing_times) > 0 :
+        filtered_data = add_missing_settlement_periods(date_string, filtered_data, missing_times)
+
+        missing_times = expected_start_times[~expected_start_times.isin(filtered_data['startTime'])]
+        if len(missing_times) > 0:
+            print("Settlement date is missing settlement periods.")
+            print(missing_times)
+
+    return filtered_data
+
+
 def generate_expected_start_times(date: str) -> pd.DatetimeIndex:
     '''
     Generate series of expected settlement period start times for given date.
@@ -157,12 +200,6 @@ def generate_expected_start_times(date: str) -> pd.DatetimeIndex:
     date_series = pd.date_range(start=start, end=end, freq=interval, tz='UTC')
 
     return date_series
-
-
-def transform_date_columns_to_datetime(df : pd.DataFrame) -> pd.DataFrame:
-    date_columns = ['settlementDate', 'startTime', 'createdDateTime']
-    df[date_columns] = df[date_columns].apply(pd.to_datetime)
-    return df
 
 
 def add_missing_settlement_periods(settlement_date : str, settlement_date_df : pd.DataFrame, missing_settlement_times : pd.DatetimeIndex) -> pd.DataFrame:
@@ -217,42 +254,8 @@ def add_missing_settlement_periods(settlement_date : str, settlement_date_df : p
     return combined_df
 
 
-def switch_timezone_to_utc(date_string : str, df : pd.DataFrame) -> pd.DataFrame:
-    """
-    Adjusts the input dataframe's times to UTC and filters out missing settlement periods.
 
-    Elexon API settlementDate parameter is based on local time (e.g. British Summer Time (BST) during Summer),
-    this function retrieves data based on UTC settlement date (rather than local) 
-    by fetching data for the previous and next day (if possible), 
-    and combining them with the current date's data (filtering out periods that don't match the UTC date).
-
-    Parameters
-    date_string : str
-        The date string in "yyyy-mm-dd" format representing the settlement date.
-    df : pd.DataFrame
-        The input dataframe containing imbalance data with a "startTime" column.
-
-    Returns
-    pd.DataFrame
-        A dataframe filtered to include only expected settlement periods, with any missing periods added if possible.
-    """
-
-    expected_start_times = generate_expected_start_times(date_string)
-    filtered_data = df[df['startTime'].isin(expected_start_times)]
-
-    missing_times = expected_start_times[~expected_start_times.isin(df['startTime'])]
-
-    if len(missing_times) > 0 :
-        filtered_data = add_missing_settlement_periods(date_string, filtered_data, missing_times)
-
-        missing_times = expected_start_times[~expected_start_times.isin(filtered_data['startTime'])]
-        if len(missing_times) > 0:
-            print("Settlement date is missing settlement periods.")
-            print(missing_times)
-
-    return filtered_data
-
-
+## Plotting functions
 def generate_price_and_imbalance_cost_plots_from_dataframe(settlement_date : str, df : pd.DataFrame) -> None:
     df['Time'] = df.apply(lambda row: f"{row['startTime'].hour:02d}:{row['startTime'].minute:02d}", axis = 1)
 
@@ -316,6 +319,9 @@ def generate_price_and_imbalance_cost_plots(settlement_date : str, time: Iterabl
     plt.show()
 
 
+
+## Calculation functions
+
 def generate_max_net_abs_imbalance_volume_hour(df : pd.DataFrame) -> tuple:
     """
     Identifies the hour (UTC) with the highest absolute imbalance volumes from the given DataFrame.
@@ -343,35 +349,6 @@ def generate_max_net_abs_imbalance_volume_hour(df : pd.DataFrame) -> tuple:
     df['absNetImbalanceVolume'] = df['netImbalanceVolume'].apply(abs)
     grouped_df = df.groupby('Hour')['absNetImbalanceVolume'].sum()
     return(grouped_df.idxmax(), grouped_df.max())
-
-
-def report_max_net_abs_imbalance_volume_hour(df : pd.DataFrame) -> None:
-    """
-    Reports the hour with the highest absolute net imbalance volume in a 12-hour AM/PM format (UTC), and the volume.
-
-    Parameters:
-    df : pd.DataFrame
-        A Pandas DataFrame containing the imbalance data, where:
-        - 'startTime' column contains datetime objects representing the start time of each settlement period.
-        - 'netImbalanceVolume' column contains the net imbalance volume (in MWh) for each period.
-
-    Returns:
-    None
-        This function prints the hour with the highest absolute imbalance volume and the volume and does not return any value.
-    """
-    max_hour, max_val = generate_max_net_abs_imbalance_volume_hour(df)
-
-    if (max_hour < 12):
-        am_pm = "am"
-    else:
-        am_pm = "pm"
-
-    max_hour = max_hour % 12
-    if max_hour == 0:
-        max_hour = 12
-
-    print(f"Hour with highest absolute imbalance volumes: {max_hour}{am_pm} (UTC),",
-            f"with net absolute imbalance volume of {np.round(max_val, 2)} MWh")
 
 
 def generate_max_abs_imbalance_volume_period_hour() -> tuple:
@@ -436,6 +413,39 @@ def calculate_total_imbalance_cost(df : pd.DataFrame) -> float:
     total_imbalance_cost = df['ImbalanceCost'].sum()
 
     return total_imbalance_cost
+
+
+
+## Reporting Functions
+
+
+def report_max_net_abs_imbalance_volume_hour(df : pd.DataFrame) -> None:
+    """
+    Reports the hour with the highest absolute net imbalance volume in a 12-hour AM/PM format (UTC), and the volume.
+
+    Parameters:
+    df : pd.DataFrame
+        A Pandas DataFrame containing the imbalance data, where:
+        - 'startTime' column contains datetime objects representing the start time of each settlement period.
+        - 'netImbalanceVolume' column contains the net imbalance volume (in MWh) for each period.
+
+    Returns:
+    None
+        This function prints the hour with the highest absolute imbalance volume and the volume and does not return any value.
+    """
+    max_hour, max_val = generate_max_net_abs_imbalance_volume_hour(df)
+
+    if (max_hour < 12):
+        am_pm = "am"
+    else:
+        am_pm = "pm"
+
+    max_hour = max_hour % 12
+    if max_hour == 0:
+        max_hour = 12
+
+    print(f"Hour with highest absolute imbalance volumes: {max_hour}{am_pm} (UTC),",
+            f"with net absolute imbalance volume of {np.round(max_val, 2)} MWh")
 
 
 def report_total_imbalance_cost(df : pd.DataFrame) -> None:
