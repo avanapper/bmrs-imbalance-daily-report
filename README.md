@@ -13,3 +13,6 @@ It provides functions to retrieve, process, and visualize imbalance data, such a
 ## Usage
 Specify required date in the main.py file and run.
 Tests are included in test_pytest.py.
+
+## Acknowledgement
+Contains BMRS data © Elexon Limited copyright and database right [2024] [license link] (https://www.elexon.co.uk/operations-settlement/bsc-central-services/balancing-mechanism-reporting-agent/copyright-licence-bmrs-data/)
