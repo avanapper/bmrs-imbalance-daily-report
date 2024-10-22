@@ -35,6 +35,58 @@ class Date:
     def from_datetime(cls, date_time: datetime) -> 'Date':
         return cls(date_time.year, date_time.month, date_time.day)
 
+def fetch_and_transform_data_for_date_string(date_string : str) -> pd.DataFrame | None:
+    """
+    Fetch data from an API for a specific date and transform the relevant columns.
+
+    This function retrieves data using the provided date string (formatted as 'yyyy-mm-dd'),
+    filters the DataFrame to include only the specified columns of interest, 
+    and converts relevant date columns to datetime format.
+
+    Parameters:
+    date_string : str
+        The date string used to fetch data from the API, formatted as 'yyyy-mm-dd'.
+
+    Returns:
+    pd.DataFrame or None:
+        A DataFrame containing the filtered and transformed data with relevant date columns
+        converted to datetime format if the data was successfully retrieved; otherwise, returns None.
+    """
+    
+    df = fetch_data_from_api_for_date_string(date_string)
+
+    if df:
+        transformed_data = transform_data_from_api(df)
+        return transformed_data
+    
+    return None
+
+
+def transform_data_from_api(df: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Transform the fetched data from the API by filtering and converting columns.
+
+    This function filters the provided DataFrame to include only the columns of interest
+    related to imbalance data and transforms specific date columns to datetime format.
+
+    Parameters:
+    df : pd.DataFrame
+        A DataFrame containing the raw data fetched from the API. It must contain columns
+        'settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime',
+        'systemSellPrice', 'systemBuyPrice', and 'netImbalanceVolume'.
+
+    Returns:
+    pd.DataFrame or None:
+        A DataFrame containing the filtered and transformed data with relevant date columns
+        converted to datetime format. Returns None if the input DataFrame is empty or invalid.
+    """
+    columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
+    filtered_data = df[columns_of_interest]
+
+    transformed_data = transform_date_columns_to_datetime(filtered_data)
+
+    return transformed_data
+
 
 def fetch_data_from_api_for_date_string(date: str) -> pd.DataFrame | None:
     '''
@@ -52,11 +104,15 @@ def fetch_data_from_api_for_date_string(date: str) -> pd.DataFrame | None:
         Columns containing times are in Coordinated Universal Time (UTC).
     '''
     response = requests.get(f"https://data.elexon.co.uk/bmrs/api/v1/balancing/settlement/system-prices/{date}?format=json")
-
+    
     if response.status_code == 200:
         data = response.json()['data']
         data = pd.DataFrame(data)
-        return data
+        if data.shape[0] > 0:
+            return data
+        else:
+            print(f"Error: no data for date: {date}")
+            return None
     else:
         print("Error: ", response.status_code)
         return None
@@ -106,37 +162,6 @@ def transform_date_columns_to_datetime(df : pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def fetch_and_transform_data_for_date_string(date_string : str) -> pd.DataFrame | None:
-    """
-    Fetch data from an API for a specific date and transform the relevant columns.
-
-    This function retrieves data using the provided date string (in format yyyy-mm-dd), 
-    filters the DataFrame to include only columns of interest, 
-    and converts the specific date columns to datetime format.
-
-    Parameters:
-    date_string: str 
-        The date string used to fetch data from the API, format yyyy-mm-dd
-
-    Returns:
-    pd.DataFrame or None: 
-        A DataFrame containing the filtered and transformed data, 
-        with relevant date columns converted to datetime format.
-    """
-    
-    df = fetch_data_from_api_for_date_string(date_string)
-    
-    if df is not None and df.shape[0] > 0:
-        columns_of_interest = ['settlementDate', 'settlementPeriod', 'startTime', 'createdDateTime', 'systemSellPrice', 'systemBuyPrice', 'netImbalanceVolume']
-        filtered_data = df[columns_of_interest]
-
-        transformed_data = transform_date_columns_to_datetime(filtered_data)
-
-        return transformed_data
-    
-    return None
-
-
 def add_missing_settlement_periods(settlement_date : str, settlement_date_df : pd.DataFrame, missing_settlement_times : pd.DatetimeIndex) -> pd.DataFrame:
     """
     Fetch data for missing settlement periods by checking previous and next settlement dates in API.
@@ -172,15 +197,15 @@ def add_missing_settlement_periods(settlement_date : str, settlement_date_df : p
 
     tomorrow_df = fetch_and_transform_data_for_date_string(date.tomorrow().to_string())
     
-    if tomorrow_df is not None and tomorrow_df.shape[0] > 0:
+    if tomorrow_df is not None:
         misplaced_periods_tomorrow = tomorrow_df[tomorrow_df['startTime'].isin(missing_settlement_times)]
 
-        if misplaced_periods_yesterday.shape[0] > 0:
+        if misplaced_periods_yesterday is not None:
             combined_df = pd.concat([misplaced_periods_yesterday, settlement_date_df, misplaced_periods_tomorrow], axis=0)
         else:
             combined_df = pd.concat([settlement_date_df, misplaced_periods_tomorrow], axis=0)
 
-    elif misplaced_periods_yesterday.shape[0] > 0:
+    elif misplaced_periods_yesterday is not None:
         combined_df = pd.concat([misplaced_periods_yesterday, settlement_date_df], axis=0)
     else:
         combined_df = settlement_date_df
@@ -211,8 +236,33 @@ def generate_price_and_imbalance_cost_plots_from_dataframe(settlement_date : str
 
     return generate_price_and_imbalance_cost_plots(settlement_date, df['Time'], df['systemSellPrice'], df['ImbalanceCost'])
 
-def generate_price_and_imbalance_cost_plots(settlement_date : str, time: Iterable[float], sell_price: Iterable[float], imbalance_cost: Iterable[float],) -> None:
 
+def generate_price_and_imbalance_cost_plots(settlement_date : str, time: Iterable[float], sell_price: Iterable[float], imbalance_cost: Iterable[float],) -> None:
+    """
+    Generates and displays two plots: one for the system price and another for the imbalance cost
+    for a specified settlement date. Each plot includes annotations for the maximum values.
+
+    Parameters:
+    settlement_date : str
+        A string representing the date of the settlement in the format 'yyyy-mm-dd'.
+    
+    time : Iterable[float]
+        An iterable containing the time points (e.g., timestamps) 
+        for the x-axis of the plots. This represents the settlement period start times in UTC.
+    
+    sell_price : Iterable[float]
+        An iterable containing the system sell prices corresponding to each time point. 
+        These values should be in £/MWh. 
+    
+    imbalance_cost : Iterable[float]
+        An iterable containing the imbalance costs corresponding to each time point. 
+        These values should be in £.
+
+    Returns:
+    None
+        This function does not return a value. It displays the generated plots directly.
+
+    """
     max_price = max(sell_price)
     max_price_time = time[sell_price.idxmax()]
 
@@ -240,13 +290,11 @@ def generate_price_and_imbalance_cost_plots(settlement_date : str, time: Iterabl
     ax2.annotate(f'Max: £{np.round(max_imbalance_cost, 2):,.2f}', xy=(max_imbalance_cost_time, max_imbalance_cost), xytext=(max_imbalance_cost_time, max_imbalance_cost * 1.1),
             arrowprops=dict(facecolor='black', arrowstyle='->'), fontsize=10, color='b')
 
-
-
-
     fig.tight_layout() 
     plt.show()
 
-def generate_max_abs_imbalance_volume_hour(df : pd.DataFrame) -> tuple:
+
+def generate_max_net_abs_imbalance_volume_hour(df : pd.DataFrame) -> tuple:
     """
     Identifies the hour (UTC) with the highest absolute imbalance volumes from the given DataFrame.
 
@@ -275,7 +323,7 @@ def generate_max_abs_imbalance_volume_hour(df : pd.DataFrame) -> tuple:
     return(grouped_df.idxmax(), grouped_df.max())
 
 
-def report_max_abs_imbalance_volume_hour(df : pd.DataFrame) -> None:
+def report_max_net_abs_imbalance_volume_hour(df : pd.DataFrame) -> None:
     """
     Reports the hour with the highest absolute net imbalance volume in a 12-hour AM/PM format (UTC), and the volume.
 
@@ -289,7 +337,7 @@ def report_max_abs_imbalance_volume_hour(df : pd.DataFrame) -> None:
     None
         This function prints the hour with the highest absolute imbalance volume and the volume and does not return any value.
     """
-    max_hour, max_val = generate_max_abs_imbalance_volume_hour(df)
+    max_hour, max_val = generate_max_net_abs_imbalance_volume_hour(df)
 
     if (max_hour < 12):
         am_pm = "am"
@@ -333,8 +381,34 @@ def generate_max_abs_imbalance_volume_period_hour() -> tuple:
 
 
 def calculate_total_imbalance_cost(df : pd.DataFrame) -> float:
-    # NIV = Net Imbalance Volume
-    # NIV > 0 means system is short
+    """
+    Calculates the total imbalance cost based on the net imbalance volume and system prices.
+
+    The function computes the imbalance cost for each entry in the DataFrame by determining 
+    whether the net imbalance volume (NIV) is positive or negative. If the NIV is positive, 
+    the cost is calculated using the system sell price; if it is negative, the cost uses 
+    the system buy price. The function returns the sum of all calculated costs.
+
+    Parameters:
+    df : pd.DataFrame
+        A DataFrame containing the following columns:
+        - 'netImbalanceVolume' (float): The net imbalance volume for the settlement period.
+        - 'systemSellPrice' (float): The system sell price per MWh.
+        - 'systemBuyPrice' (float): The system buy price per MWh.
+    
+    Returns:
+    float
+        The total imbalance cost calculated in £, representing the overall cost incurred 
+        based on the net imbalance volumes and corresponding prices.
+
+    Notes:
+    - A positive net imbalance volume indicates that the system is short, meaning 
+      there is more demand than supply, leading to costs calculated using the 
+      system sell price.
+    - A negative net imbalance volume indicates that the system is long, meaning 
+      there is more supply than demand, leading to costs calculated using the 
+      system buy price.
+    """
     df['ImbalanceCost'] = np.where(df['netImbalanceVolume'] > 0, df['netImbalanceVolume'] * df['systemSellPrice'], df['netImbalanceVolume'] * df['systemBuyPrice'])
 
     total_imbalance_cost = df['ImbalanceCost'].sum()
@@ -348,6 +422,27 @@ def report_total_imbalance_cost(df : pd.DataFrame) -> None:
 
 
 def output_report_and_plots_for_date(date: str, use_local_timezone: bool) -> None:
+    """
+    Fetches, transforms, and reports imbalance data for a specified date, generating plots for system prices 
+    and imbalance costs. The function can switch between local timezone and UTC for the date the data is obtained for.
+
+    Parameters:
+    date : str
+        A string representing the date in the format 'yyyy-mm-dd' for which the report and plots 
+        are to be generated.
+    
+    use_local_timezone : bool
+        A boolean flag indicating whether to use the local timezone for the data. If set to True, 
+        the data will be processed in the local timezone; if False, the data will be converted to 
+        UTC before further processing.
+
+    Returns:
+    None
+        This function does not return a value. It directly outputs the report and displays 
+        the generated plots.
+
+    """
+        
     df = fetch_and_transform_data_for_date_string(date)
 
     if not use_local_timezone:
@@ -355,11 +450,11 @@ def output_report_and_plots_for_date(date: str, use_local_timezone: bool) -> Non
         
     report_total_imbalance_cost(df)
 
-    report_max_abs_imbalance_volume_hour(df)
+    report_max_net_abs_imbalance_volume_hour(df)
 
     generate_price_and_imbalance_cost_plots_from_dataframe(date, df)
 
 
 if __name__ == "__main__":
-    date_string = "2024-10-15"
+    date_string = "2024-01-01"
     output_report_and_plots_for_date(date_string, use_local_timezone=True)
