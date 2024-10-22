@@ -218,6 +218,24 @@ def add_missing_settlement_periods(settlement_date : str, settlement_date_df : p
 
 
 def switch_timezone_to_utc(date_string : str, df : pd.DataFrame) -> pd.DataFrame:
+    """
+    Adjusts the input dataframe's times to UTC and filters out missing settlement periods.
+
+    Elexon API settlementDate parameter is based on local time (e.g. British Summer Time (BST) during Summer),
+    this function retrieves data based on UTC settlement date (rather than local) 
+    by fetching data for the previous and next day (if possible), 
+    and combining them with the current date's data (filtering out periods that don't match the UTC date).
+
+    Parameters
+    date_string : str
+        The date string in "yyyy-mm-dd" format representing the settlement date.
+    df : pd.DataFrame
+        The input dataframe containing imbalance data with a "startTime" column.
+
+    Returns
+    pd.DataFrame
+        A dataframe filtered to include only expected settlement periods, with any missing periods added if possible.
+    """
 
     expected_start_times = generate_expected_start_times(date_string)
     filtered_data = df[df['startTime'].isin(expected_start_times)]
